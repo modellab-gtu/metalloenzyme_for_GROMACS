@@ -1,0 +1,79 @@
+--- a/pymsmt/mol/gauio.py
++++ b/pymsmt/mol/gauio.py
+@@ -5,6 +5,10 @@
+ 
+ import numpy
+ import linecache
++import os
++# GTU: Gaussian resources for MCPB-generated inputs (default = upstream 3000MB / 2 cores)
++_GAU_MEM = os.environ.get('MCPB_GAU_MEM', '3000MB')
++_GAU_NPROC = os.environ.get('MCPB_GAU_NPROC', '2')
+ from pymsmt.exp import *
+ from pymsmt.mol.constants import B_TO_A
+ from parmed.periodic_table import AtomicNum
+@@ -87,8 +91,8 @@
+     ##Geometry Optimization file
+     optf = open(goptf, 'w')
+     print("%%Chk=%s_small_opt.chk" %outf, file=optf)
+-    print("%Mem=3000MB", file=optf)
+-    print("%NProcShared=2", file=optf)
++    print("%Mem=" + _GAU_MEM, file=optf)
++    print("%NProcShared=" + _GAU_NPROC, file=optf)
+ 
+     if naddred_list != []:
+         print("# B3LYP/6-31G* Geom=PrintInputOrient " + \
+@@ -128,8 +132,8 @@
+     ##Geometry Optimization file
+     optf = open(goptf, 'w')
+     print("%%Chk=%s_cluster_opt.chk" %outf, file=optf)
+-    print("%Mem=3000MB", file=optf)
+-    print("%NProcShared=2", file=optf)
++    print("%Mem=" + _GAU_MEM, file=optf)
++    print("%NProcShared=" + _GAU_NPROC, file=optf)
+     print("# B3LYP/6-31G* Geom=PrintInputOrient " + \
+                    "Integral=(Grid=UltraFine) Opt", file=optf)
+     print(" ", file=optf)
+@@ -184,8 +188,8 @@
+     # Gaussian input file for QM plus Charge calculation
+     optf = open(goptf, 'w')
+     print("%%Chk=%s_cluster.chk" %outf, file=optf)
+-    print("%Mem=3000MB", file=optf)
+-    print("%NProcShared=2", file=optf)
++    print("%Mem=" + _GAU_MEM, file=optf)
++    print("%NProcShared=" + _GAU_NPROC, file=optf)
+     print("# B3LYP/6-31G* charge", file=optf)
+     print(" ", file=optf)
+     print("CLR", file=optf)
+@@ -205,8 +209,8 @@
+     ##Force constant calculation file
+     fcf = open(gfcf, 'w')
+     print("%%Chk=%s_small_opt.chk" %outf, file=fcf)
+-    print("%Mem=3000MB", file=fcf)
+-    print("%NProcShared=2", file=fcf)
++    print("%Mem=" + _GAU_MEM, file=fcf)
++    print("%NProcShared=" + _GAU_NPROC, file=fcf)
+     print("# B3LYP/6-31G* Freq Geom=AllCheckpoint Guess=Read", file=fcf)
+ 
+     if naddred_list != []:
+@@ -231,8 +235,8 @@
+     ##Force constant calculation file
+     fcf = open(gfcf, 'w')
+     print("%%Chk=%s_cluster_opt.chk" %outf, file=fcf)
+-    print("%Mem=3000MB", file=fcf)
+-    print("%NProcShared=2", file=fcf)
++    print("%Mem=" + _GAU_MEM, file=fcf)
++    print("%NProcShared=" + _GAU_NPROC, file=fcf)
+     print("# B3LYP/6-31G* Freq Geom=AllCheckpoint Guess=Read", file=fcf)
+     print("Integral=(Grid=UltraFine) IOp(7/33=1)", file=fcf)
+     print(" ", file=fcf)
+@@ -245,8 +249,8 @@
+     ##MK RESP input file
+     mkf = open(gmkf, 'w')
+     print("%%Chk=%s_large_mk.chk" %outf, file=mkf)
+-    print("%Mem=3000MB", file=mkf)
+-    print("%NProcShared=2", file=mkf)
++    print("%Mem=" + _GAU_MEM, file=mkf)
++    print("%NProcShared=" + _GAU_NPROC, file=mkf)
+ 
+     if largeopt == 0:
+         print("# B3LYP/6-31G* Integral=(Grid=UltraFine) " + \

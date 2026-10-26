@@ -1,0 +1,7 @@
+#!/bin/bash
+# metalprep launcher: always the shared AmberTools 25 env (parmed, openmm, MCPB.py, tleap), isolated from
+# user python paths and from any other AMBERHOME in the user's environment
+AT=${METALPREP_AMBERTOOLS:-/cta/capps/envs/AmberTools25}
+export AMBERHOME=$AT PATH=$AT/bin:$PATH PYTHONNOUSERSITE=1
+unset PYTHONPATH PYTHONHOME
+exec "$AT/bin/python" "$(dirname "$(readlink -f "$0")")/../src/metalprep.py" "$@"
