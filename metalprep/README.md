@@ -94,7 +94,7 @@ scripts run it automatically.
 
 The generated Slurm scripts use GTU defaults (partition `main`; QM on `cws02`; MD on `cws01` with GPU or `cws02` with CPU; `gaussian/g16-avx2` and `gromacs/2026.1-tmpi(-cuda)` modules), so adapt them for other clusters.
 
-The original manual scripts for the 4LXC protocol are in `../Metalloenzyme_for_GROMACS/`. **Do not run its `fix_G16_default_for_orfoz.sh`**: metalprep sets the Gaussian memory and cores through the `MCPB_GAU_MEM` and `MCPB_GAU_NPROC` environment variables instead of editing the shared pymsmt files.
+The original manual 4LXC scripts are in the git history (commit `6ccda33`). **Do not run their `fix_G16_default_for_orfoz.sh`**: metalprep sets the Gaussian memory and cores through the `MCPB_GAU_MEM` and `MCPB_GAU_NPROC` environment variables instead of editing the shared pymsmt files.
 
 ## Notes
 - Protein force field: `--ff ff19SB` (default) or `ff14SB`. ZAFF and MCPB residues are ff14SB-era parameters. The
