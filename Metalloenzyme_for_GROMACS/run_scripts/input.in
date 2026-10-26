@@ -1,0 +1,11 @@
+
+ion_ids 3738
+ion_info ZN ZN Zn 2
+gaff 0
+ion_mol2files ZN.mol2
+original_pdb 4lxc_chainA_only_clean_fixed.pdb
+software_version g16
+water_model TIP3P
+large_opt 1
+cut_off 2.8
+scale_factor 0.9
