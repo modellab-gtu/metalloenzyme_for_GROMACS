@@ -1,6 +1,6 @@
-> **New (2026-10): automated pipeline → [`../metalprep`](../metalprep/README.md).**
+> **New (2026-10): automated pipeline → metalprep, at the [repository root](../README.md).**
 > `metalprep` automates this 4LXC protocol for any PDB entry, chain and metal. It supports bonded MCPB.py+G16 or ZAFF models and non-bonded 12-6 or 12-6-4 models, writes Amber and GROMACS outputs, and generates the same staged-restraint MD scripts.
-> Do **not** use `run_scripts/fix_G16_default_for_orfoz.sh` with it, because that script edits the shared pymsmt files; see the metalprep README.
+> Do **not** use `run_scripts/fix_G16_default_for_orfoz.sh` with it, because that script edits the shared pymsmt files; see the [repository README](../README.md).
 > The scripts below are kept for reference.
 
 The current version requires following programs installed:
