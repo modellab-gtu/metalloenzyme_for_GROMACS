@@ -1,5 +1,12 @@
-pymol_COM.sh file writes the center of masses of all docked poses as a cooordinate file. It is useful for visualizing docked regions.
+# metalloenzyme_for_GROMACS
 
-rmsd_matrix_align.py allows one to create rmsd matrix of the molecules' 3D coordinate files in a directory and then clusters them hierarcically. Useful for distinguishing local minima structures in a given set of conformations. 
+Preparing metalloproteins for molecular dynamics, with Amber parameters run in GROMACS or Amber.
 
-align.py just aligns two molecules using rdkit and reports the best rmsd along with saving the aligned structures.
+| Folder | Contents |
+|---|---|
+| [`metalprep/`](metalprep/README.md) | **Automated pipeline.** Use this for new systems. It prepares any PDB entry, chain and metal with bonded models (MCPB.py + Gaussian 16, or ZAFF) or non-bonded models (Li/Merz 12-6 or 12-6-4). It writes Amber and GROMACS topologies, checks that their energies agree, and generates staged-restraint MD scripts and metal-site checks. |
+| [`Metalloenzyme_for_GROMACS/`](Metalloenzyme_for_GROMACS/README.md) | The original manual Zn protocol (lysostaphin 4LXC) that metalprep automates. Kept for reference. |
+
+Related repositories:
+- [modellab-gtu/charge_updated_MD](https://github.com/modellab-gtu/charge_updated_MD): MD with on-the-fly AIMNet2 charges.
+- [modellab-gtu/useful_python_scripts](https://github.com/modellab-gtu/useful_python_scripts): alignment, RMSD clustering, G16 scan and geometry utilities.
