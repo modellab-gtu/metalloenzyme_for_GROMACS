@@ -15,7 +15,7 @@ Flow (generalised from modellab-gtu/metalloenzyme_for_GROMACS, 4LXC Zn test case
 
 Subcommands: prepare | finish (mcpb, after QM) | check (metal-site distances vs crystal)
 """
-import argparse, json, os, re, shutil, subprocess, sys, textwrap
+import argparse, getpass, json, os, re, shutil, subprocess, sys, textwrap
 import numpy as np
 
 # absolute launcher path, so generated batch scripts work without "module load metalprep"
@@ -613,6 +613,7 @@ def index_and_restraints(args, work, sites):
     groups = {
         "System": list(range(len(s.atoms))),
         "Protein": prot, "Protein-H": heavy(prot),
+        "Backbone": [i for i in prot if s.atoms[i].name in ("N", "CA", "C")],
         "Metal": metal, f"Protein_{'_'.join(sorted(args.metal_names))}": sorted(prot + metal),
         "catal": catal, "catal-H": heavy(catal),
         "loop": loop, "loop-H": heavy(loop),
@@ -720,26 +721,39 @@ def write_md_files(args, work):
         t = open(os.path.join(DATA, "mdp", f)).read()
         t = re.sub(r"(?m)^(\s*ref_t\s*=\s*)[0-9.]+", rf"\g<1>{args.temperature:g}", t)
         open(os.path.join(mdpdir, f), "w").write(t)
-    gpu = args.md_node == "cws01"
-    gmxmod = "gromacs/2026.1-tmpi-cuda" if gpu else "gromacs/2026.1-tmpi"
-    res = "#SBATCH --gres=gpu:1\n#SBATCH -c 8" if gpu else "#SBATCH -c 32"
-    mdrun = "gmx mdrun -ntmpi 1 -ntomp $SLURM_CPUS_PER_TASK -nb gpu -pme gpu -bonded gpu -update gpu" if gpu \
-        else "gmx mdrun -ntmpi 1 -ntomp $SLURM_CPUS_PER_TASK"
-    mdrun_em = "gmx mdrun -ntmpi 1 -ntomp $SLURM_CPUS_PER_TASK"
-    gp = "gmx grompp -n index.ndx -p system.top -maxwarn 1"
+    truba = getattr(args, "cluster", "gtu") == "truba"
+    if truba:
+        # TRUBA/ARF CPU node, as the original arf.slurm: one node, MPI ranks, gmx_mpi
+        gmx = "gmx_mpi"
+        head = (f"#SBATCH -p {args.truba_partition}\n#SBATCH -A {args.truba_account}\n#SBATCH -N 1\n"
+                f"#SBATCH -n {args.truba_ntasks}\n#SBATCH -C weka")
+        load = f"module load {args.truba_gmx_module}\nexport GMX_MAXBACKUP=-1 OMP_NUM_THREADS=1  # one thread per MPI rank"
+        mdrun = mdrun_em = "mpirun -np $SLURM_NTASKS gmx_mpi mdrun"
+        tmin, tmd, throttle = args.truba_time, args.truba_time, ""
+        chk_min = "# site check: copy em_cg44.gro to the GTU cluster and run 'metalprep check . em_cg44.gro'"
+        chk_md = "# site check: copy npt5_$r.gro to the GTU cluster and run 'metalprep check . npt5_$r.gro'"
+    else:
+        gmx = "gmx"
+        gpu = args.md_node == "cws01"
+        head = f"#SBATCH -p main\n#SBATCH -w {args.md_node}\n#SBATCH --ntasks=1\n" + \
+               ("#SBATCH --gres=gpu:1\n#SBATCH -c 8" if gpu else "#SBATCH -c 32")
+        load = (f"module load {'gromacs/2026.1-tmpi-cuda' if gpu else 'gromacs/2026.1-tmpi'}\n"
+                "export GMX_MAXBACKUP=-1 CUDA_DEVICE_ORDER=PCI_BUS_ID")
+        mdrun = "gmx mdrun -ntmpi 1 -ntomp $SLURM_CPUS_PER_TASK" + (" -nb gpu -pme gpu -bonded gpu -update gpu" if gpu else "")
+        mdrun_em = "gmx mdrun -ntmpi 1 -ntomp $SLURM_CPUS_PER_TASK"
+        tmin, tmd, throttle = "04:00:00", "3-00:00:00", f"%{1 if gpu else 2}"
+        chk_min = f"{MP_EXE} check . em_cg44.gro || true"
+        chk_md = f"{MP_EXE} check . npt5_$r.gro || true"
+    gp = f"{gmx} grompp -n index.ndx -p system.top -maxwarn 1"
     mini = textwrap.dedent(f"""\
         #!/bin/bash
         #SBATCH -J mp_min
-        #SBATCH -p main
-        #SBATCH -w {args.md_node}
-        #SBATCH --ntasks=1
-        @RES@
-        #SBATCH -t 04:00:00
+        @HEAD@
+        #SBATCH -t {tmin}
         #SBATCH -o min_%j.out
         # Staged minimisation (4LXC protocol): steep+cg, then steep+cg at STEP4_0..4_4 (restraints 4000 -> 0)
         set -euo pipefail
-        module load {gmxmod}
-        export GMX_MAXBACKUP=-1 CUDA_DEVICE_ORDER=PCI_BUS_ID
+        @LOAD@
         cd "$SLURM_SUBMIT_DIR"
         {gp} -f MDP/em_steep.mdp -c system.gro -r system.gro -o em_steep.tpr
         {mdrun_em} -deffnm em_steep
@@ -753,22 +767,18 @@ def write_md_files(args, work):
           {mdrun_em} -deffnm em_cg4$i
           prev=em_cg4$i
         done
-        {MP_EXE} check . em_cg44.gro || true
+        {chk_min}
         """)
     md = textwrap.dedent(f"""\
         #!/bin/bash
         #SBATCH -J mp_md
-        #SBATCH -p main
-        #SBATCH -w {args.md_node}
-        #SBATCH --ntasks=1
-        @RES@
-        #SBATCH -t 3-00:00:00
+        @HEAD@
+        #SBATCH -t {tmd}
         #SBATCH -o md_%A_%a.out
-        #SBATCH --array=0-{args.replicas - 1}%{1 if gpu else 2}
+        #SBATCH --array=0-{args.replicas - 1}{throttle}
         # One replica per array task: NVT release STEP4_0..4_4 (new velocities each replica), NPT, production
         set -euo pipefail
-        module load {gmxmod}
-        export GMX_MAXBACKUP=-1 CUDA_DEVICE_ORDER=PCI_BUS_ID
+        @LOAD@
         cd "$SLURM_SUBMIT_DIR"
         r=$SLURM_ARRAY_TASK_ID
         {gp} -f MDP/nvt50.mdp -c em_cg44.gro -r em_cg44.gro -o nvt50_$r.tpr
@@ -781,7 +791,7 @@ def write_md_files(args, work):
         {mdrun} -deffnm npt5_$r
         {gp} -f MDP/md6.mdp -c npt5_$r.gro -t npt5_$r.cpt -o md6_$r.tpr
         {mdrun} -deffnm md6_$r -cpi md6_$r.cpt
-        {MP_EXE} check . npt5_$r.gro || true
+        {chk_md}
         """)
     submit = textwrap.dedent("""\
         #!/bin/bash
@@ -792,23 +802,47 @@ def write_md_files(args, work):
         a=$(sbatch --parsable --dependency=afterok:$m run_gmx_md.sbatch)
         echo "submitted: minimisation $m, MD array $a"
         """)
-    mini, md = mini.replace("@RES@", res), md.replace("@RES@", res)
+    mini, md = (t.replace("@HEAD@", head).replace("@LOAD@", load) for t in (mini, md))
     for n, t in (("run_gmx_min.sbatch", mini), ("run_gmx_md.sbatch", md), ("submit_gromacs.sh", submit)):
         p = os.path.join(work, n); open(p, "w").write(t); os.chmod(p, 0o755)
-    # analysis (named groups, no hard-coded group numbers)
+    # analysis: port of the 4LXC MD_analysis.sh (named index groups instead of group numbers)
+    P = f"Protein_{'_'.join(sorted(args.metal_names))}"
+    tag = "pro" + "".join(sorted(args.metal_names)).lower()
+    chk_ana = f"{MP_EXE} check . $trj.xtc --tpr md6_$r.tpr || true" if not truba else \
+        "# site check: run 'metalprep check . $trj.xtc --tpr md6_$r.tpr' on the GTU cluster"
     ana = textwrap.dedent(f"""\
         #!/bin/bash
-        # Usage: bash md_analysis.sh [replica]   (run inside a job or interactive node; gmx module loaded)
+        # Usage: bash md_analysis.sh [replica ...]   (default: every md6_<r>.xtc here; GROMACS module loaded)
+        # Port of the 4LXC MD_analysis.sh. Per replica: remove jumps, fit on the backbone of the X-ray-based EM
+        # structure, then gyration, RMSF (per residue and per atom, B-factor PDBs) and RMSD (all atoms of {P},
+        # protein, backbone, metal site) against the X-ray (em_steep40) and the starting (md6_<r>) structures.
         set -euo pipefail
-        r=${{1:-0}}; P=Protein_{'_'.join(sorted(args.metal_names))}
-        echo $P | gmx trjconv -f md6_$r.xtc -s em_steep40.tpr -n index.ndx -pbc nojump -o md6_${{r}}_nojump.xtc
-        printf "Protein-H\\n$P\\n" | gmx trjconv -f md6_${{r}}_nojump.xtc -s em_steep40.tpr -n index.ndx -fit rot+trans -o md6_${{r}}_fit.xtc
-        rm md6_${{r}}_nojump.xtc
-        echo $P | gmx gyrate -f md6_${{r}}_fit.xtc -s md6_$r.tpr -n index.ndx -o gyr_${{r}}.xvg
-        echo $P | gmx rmsf -f md6_${{r}}_fit.xtc -s md6_$r.tpr -n index.ndx -res -o rmsf_res_${{r}}.xvg -ox average_${{r}}.pdb
-        printf "Protein-H\\nProtein-H\\n" | gmx rms -f md6_${{r}}_fit.xtc -s em_steep40.tpr -n index.ndx -o rmsd_heavy_vs_xray_${{r}}.xvg
-        printf "catal-H\\ncatal-H\\n" | gmx rms -f md6_${{r}}_fit.xtc -s em_steep40.tpr -n index.ndx -o rmsd_site_vs_xray_${{r}}.xvg
-        {MP_EXE} check . md6_${{r}}_fit.xtc --tpr md6_$r.tpr || true
+        export GMX_MAXBACKUP=-1
+        GMX=${{GMX:-{gmx}}}
+        P={P}; tag={tag}
+        reps=("$@")
+        [ ${{#reps[@]}} -gt 0 ] || reps=($(ls md6_*.xtc 2>/dev/null | sed -n 's/^md6_\\([0-9]*\\)\\.xtc$/\\1/p' | sort -n))
+        [ ${{#reps[@]}} -gt 0 ] || {{ echo "no md6_<r>.xtc found" >&2; exit 1; }}
+        for r in "${{reps[@]}}"; do
+          trj=trjnojump_${{tag}}_highres_$r
+          echo $P | $GMX trjconv -f md6_$r.xtc -s em_steep40.tpr -n index.ndx -pbc nojump -ur compact -o ${{trj}}_nofit.xtc
+          printf "Backbone\\n$P\\n" | $GMX trjconv -f ${{trj}}_nofit.xtc -s em_steep40.tpr -n index.ndx -fit rot+trans -o $trj.xtc
+          rm ${{trj}}_nofit.xtc
+          for wrt in xraystr startstr; do
+            if [ $wrt = xraystr ]; then ref=em_steep40; else ref=md6_$r; fi
+            echo $P       | $GMX gyrate -f $trj.xtc -s $ref.tpr -n index.ndx -o gyr_${{tag}}_${{wrt}}_$r.xvg
+            echo Backbone | $GMX gyrate -f $trj.xtc -s $ref.tpr -n index.ndx -o gyr_back_${{wrt}}_$r.xvg
+            echo $P | $GMX rmsf -f $trj.xtc -s $ref.tpr -n index.ndx -res -o rmsf-per-residue_${{wrt}}_$r.xvg \\
+                         -ox average_${{wrt}}_$r.pdb -oq bfactors-residue_${{wrt}}_$r.pdb
+            echo $P | $GMX rmsf -f $trj.xtc -s $ref.tpr -n index.ndx -o rmsf-per-atom_${{wrt}}_$r.xvg \\
+                         -oq bfactors-atom_${{wrt}}_$r.pdb
+            printf "$P\\n$P\\n"             | $GMX rms -f $trj.xtc -s $ref.tpr -n index.ndx -o rmsd-all-atom_${{wrt}}_$r.xvg
+            printf "Protein\\nProtein\\n"   | $GMX rms -f $trj.xtc -s $ref.tpr -n index.ndx -o rmsd-prot_${{wrt}}_$r.xvg
+            printf "Backbone\\nBackbone\\n" | $GMX rms -f $trj.xtc -s $ref.tpr -n index.ndx -o rmsd-back_${{wrt}}_$r.xvg
+            printf "catal-H\\ncatal-H\\n"   | $GMX rms -f $trj.xtc -s $ref.tpr -n index.ndx -o rmsd-site_${{wrt}}_$r.xvg
+          done
+          {chk_ana}
+        done
         """)
     p = os.path.join(work, "md_analysis.sh"); open(p, "w").write(ana); os.chmod(p, 0o755)
     # Amber pmemd.cuda route (required for 12-6-4; optional otherwise)
@@ -1074,6 +1108,13 @@ def main():
     a.add_argument("--replicas", type=int, default=10)
     a.add_argument("--temperature", type=float, default=310.0)
     a.add_argument("--md-node", default="cws01", choices=["cws01", "cws02"], help="cws01 = GPU, cws02 = CPU")
+    a.add_argument("--cluster", default="gtu", choices=["gtu", "truba"],
+                   help="where the GROMACS jobs run: gtu (cws01/cws02) or truba (ARF, CPU nodes, gmx_mpi + mpirun)")
+    a.add_argument("--truba-account", default=getpass.getuser(), help="TRUBA Slurm account (-A), default: your user name")
+    a.add_argument("--truba-partition", default="orfoz")
+    a.add_argument("--truba-ntasks", type=int, default=110, help="MPI ranks per TRUBA job (default 110, one orfoz node)")
+    a.add_argument("--truba-gmx-module", default="apps/gromacs/2024.1-oneapi2024")
+    a.add_argument("--truba-time", default="3-00:00:00")
     a.add_argument("-o", "--out", required=True)
     a.add_argument("--force", action="store_true", help="rebuild an existing metalprep output directory from scratch")
     f = sub.add_parser("finish", help="(mcpb) MCPB steps 2-4 + system build after the Gaussian jobs")
