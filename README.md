@@ -54,8 +54,24 @@ metalprep automates the GTU Zn-enzyme protocol (modellab-gtu/metalloenzyme_for_G
    - **GROMACS run files:** the protocol's `MDP/` files and `submit_gromacs.sh`, which runs a staged minimisation and
      then a replica array (`--replicas 10`). Each replica does an NVT release, NPT and 20 ns of production. GPU (cws01)
      is the default; `--md-node cws02` runs on CPU.
+     - **`--cluster truba`** writes the same scripts for TRUBA/ARF instead, as in the original `arf.slurm`: partition
+       `orfoz`, `-A <your user>`, one node with 110 MPI ranks, `-C weka`, `apps/gromacs/2024.1-oneapi2024`, and
+       `mpirun gmx_mpi`.
+     - Change these with `--truba-partition`, `--truba-account`, `--truba-ntasks`, `--truba-gmx-module` and
+       `--truba-time`.
+     - Prepare on chn, copy the folder to TRUBA, and run `bash submit_gromacs.sh` there. metalprep itself is not on
+       TRUBA, so run `metalprep check` back on chn.
    - **Amber run file:** `run_amber.sbatch` (pmemd.cuda), the route to use for 12-6-4.
-   - **Analysis:** `md_analysis.sh`.
+   - **Analysis:** `bash md_analysis.sh [replica ...]` analyses every `md6_<r>.xtc` by default. It ports the original
+     `MD_analysis.sh` and uses named index groups instead of group numbers.
+     - **Trajectory:** jumps are removed and the frames fitted on the backbone of the X-ray-based minimised structure.
+     - **Two references:** everything below is computed against both the X-ray structure (`em_steep40`, `xraystr`) and
+       the starting structure (`md6_<r>`, `startstr`).
+     - **Outputs:**
+       - radius of gyration of `Protein_<metal>` and of the backbone;
+       - RMSF per residue and per atom, with average-structure and B-factor PDBs;
+       - RMSD of all atoms, protein, backbone and the metal site (`catal-H`);
+       - `metalprep check` on the trajectory.
 
 ## Commands
 A worked example script is in `examples/4LXC.sh`.
@@ -66,7 +82,9 @@ metalprep prepare --pdb 2GIV.pdb       --model zaff   -o 2GIV_zaff
 metalprep prepare --pdb 4LXC --chain B --model nb126  --ion-set iod -o 4LXC_126
 metalprep prepare --pdb 4LXC --chain B --model nb1264 -o 4LXC_1264
 metalprep prepare ... --site-only        # only the site report (check His states before spending QM time)
+metalprep prepare ... --cluster truba    # GROMACS scripts for TRUBA orfoz (copy the folder there)
 cd 4LXC_mcpb && bash submit_gromacs.sh   # or: sbatch run_amber.sbatch
+bash md_analysis.sh                      # after MD: gyration, RMSF, RMSD vs X-ray and start structures
 metalprep check 4LXC_mcpb md6_0.gro      # metal–donor distances vs the crystal (also *.rst7, or *.xtc with --tpr)
 ```
 `metalprep check` flags any metal–donor distance that has moved more than 0.5 Å from the crystal. The minimisation and MD
@@ -84,6 +102,9 @@ scripts run it automatically.
 - **ff19SB CMAP fix:** plain ParmEd conversion merges ff19SB's 13 residue-specific CMAP corrections into one. On 4LXC
   that gives a CMAP energy of 668 instead of 948 kJ/mol. metalprep keeps the classes separate.
 - **Short GPU runs:** the full GROMACS chain (staged EM, NVT release, NPT, MD) and the Amber chain both run.
+- **`--cluster truba`:** the generated scripts were tested on cws02 with only the Slurm header and module line swapped
+  (16 MPI ranks with `gmx_mpi`). The full minimisation and 2-replica MD chain ran, and `md_analysis.sh` gave all 32
+  outputs. The scripts set `OMP_NUM_THREADS=1`; without it each rank started 4 threads and the run slowed threefold.
 - **4LXC chain B site:** His279 binds through NE2 (HID), His362 through ND1 (HIE), and Asp283 through OD1. The fourth
   position is open: it holds a crystallisation sulfate in chain A and nothing in chains B–D.
 
@@ -103,7 +124,7 @@ scripts run it automatically.
 4. Run `src/metalprep_data/get_zaff.sh` once to download the ZAFF library from ambermd.org.
 5. Put `bin/` on your PATH.
 
-The generated Slurm scripts use GTU defaults (partition `main`; QM on `cws02`; MD on `cws01` with GPU or `cws02` with CPU; `gaussian/g16-avx2` and `gromacs/2026.1-tmpi(-cuda)` modules), so adapt them for other clusters.
+The generated Slurm scripts use GTU defaults (partition `main`; QM on `cws02`; MD on `cws01` with GPU or `cws02` with CPU; `gaussian/g16-avx2` and `gromacs/2026.1-tmpi(-cuda)` modules), so adapt them for other clusters, or use `--cluster truba` for TRUBA/ARF.
 
 The original manual scripts for the 4LXC protocol are in [`Metalloenzyme_for_GROMACS/`](Metalloenzyme_for_GROMACS/README.md). **Do not run its `fix_G16_default_for_orfoz.sh`**: metalprep sets the Gaussian memory and cores through the `MCPB_GAU_MEM` and `MCPB_GAU_NPROC` environment variables instead of editing the shared pymsmt files.
 
